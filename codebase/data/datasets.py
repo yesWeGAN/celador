@@ -89,6 +89,6 @@ class IFSet(datasets.ImageFolder):
                 im.verify()
                 im.close()
             except:
-                print(f"Broken image file {path}. Removing.")
+                # print(f"Broken image file {path}. Removing.")
                 os.remove(path)
                 self.samples.remove(sample)

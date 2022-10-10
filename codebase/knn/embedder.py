@@ -15,13 +15,8 @@ warnings.filterwarnings('ignore')
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.cuda.empty_cache()
 
-print(f'Using {device} for inference')
 
-
-def init_model():
-    efficientnet = torchvision.models.efficientnet_b0(
-        weights=torchvision.models.efficientnet.EfficientNet_B0_Weights.DEFAULT)
-    return torch.nn.Sequential(*list(efficientnet.children())[:-1])
+# print(f'Using {device} for inference')
 
 
 def parse_args():
@@ -44,8 +39,20 @@ class Embedder:
         batchsize:          batchsize
         """
 
-    def __init__(self, inputpath, outputpath, batchsize):
-        self.net = init_model()
+    def __init__(self, inputpath=".", outputpath=".", batchsize=300):
+        """lazy init. enables one-by-one processing of subdirectories via update_params() once checks have passed.
+        pro: only setup EfficientNet model once."""
+        self.net = None
+        self.inputpath = Path(inputpath)
+        self.outputpath = Path(outputpath)
+        self.batchsize = batchsize
+        self.dataloader = None
+        self.filepaths = {}
+        self.all_paths = []
+        self.tensorpaths = {}
+        self.write_path = os.path.join(self.outputpath, self.inputpath.name)
+
+    def update_params(self, inputpath, outputpath, batchsize):
         self.inputpath = Path(inputpath)
         self.outputpath = Path(outputpath)
         self.batchsize = batchsize
@@ -55,9 +62,14 @@ class Embedder:
         self.tensorpaths = {}
         self.write_path = os.path.join(self.outputpath, self.inputpath.name)
 
+    def init_model(self):
+        efficientnet = torchvision.models.efficientnet_b0(
+            weights=torchvision.models.efficientnet.EfficientNet_B0_Weights.DEFAULT)
+        self.net = torch.nn.Sequential(*list(efficientnet.children())[:-1])
+
     def dataloader_setup(self):
         dataset = IFSet(self.inputpath.as_posix(), transform=efficientnet_transforms)
-        dataset.sanity_check_imagefiles()  # avoid PIL.UnidentifiedImageError
+        # dataset.sanity_check_imagefiles()  # avoid PIL.UnidentifiedImageError
         return DataLoader(dataset=dataset, batch_size=self.batchsize, num_workers=16)
 
     def update_filepaths(self, index, paths):
@@ -85,6 +97,9 @@ class Embedder:
         glob = sorted(glob, key=os.path.getctime)
 
         tensors = [torch.load(open(path, 'rb')) for path in glob]
+        for index, tensor in enumerate(tensors):
+            if len(tensor.shape) < 2:   # tensors must have the same size, but single-entry tensors (one image) have d=1
+                tensors[index] = tensor.unsqueeze(dim=0)
         merge = torch.cat(tensors)
         torch.save(merge, os.path.join(self.write_path, f"tensors.pt"))
 
@@ -99,16 +114,18 @@ class Embedder:
     def embed(self):
         self.net.eval().to(device)
         os.makedirs(self.write_path, exist_ok=True)
-        print(f"Embedding {len(self.dataloader) * self.batchsize} images in {len(self.dataloader)} batches.")
-
-        for index, batch in tqdm(enumerate(self.dataloader)):
-            tensors, paths = batch
-            tensors = tensors.to(device)
-            with torch.no_grad():
-                outputs = self.net(tensors)
-                outputs = outputs.squeeze()
-                torch.save(outputs, os.path.join(self.write_path, f"batch_{index}.pt"))
-            self.update_filepaths(index, paths)
+        # print(f"Embedding {len(self.dataloader) * self.batchsize} images in {len(self.dataloader)} batches.")
+        try:
+            for index, batch in enumerate(self.dataloader):
+                tensors, paths = batch
+                tensors = tensors.to(device)
+                with torch.no_grad():
+                    outputs = self.net(tensors)
+                    outputs = outputs.squeeze()
+                    torch.save(outputs, os.path.join(self.write_path, f"batch_{index}.pt"))
+                self.update_filepaths(index, paths)
+        except:
+            print(f"error in: {self.inputpath.name}")
 
 
 def main():
@@ -116,8 +133,10 @@ def main():
     parentfolder = kwargs.pop("inputpath")
     subdirectories = [p for p in Path(parentfolder).iterdir() if p.is_dir()]
     assert len(subdirectories) > 0, "No subdirectories found! Provide a parent path or move images to subfolder."
-    for sub in subdirectories:
-        embedder = Embedder(sub, **kwargs)
+    embedder = Embedder()
+    embedder.init_model()
+    for sub in tqdm(subdirectories):
+        embedder.update_params(sub, **kwargs)
         if os.path.exists(embedder.write_path):
             if len(os.listdir(embedder.write_path)) == 2:
                 print(f"Directory {embedder.inputpath.name} already processed. Moving on.")

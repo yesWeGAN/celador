@@ -51,6 +51,8 @@ class KNNIndexInference:
 
     def embed_query(self):
         embedder = Embedder(inputpath=self.inputpath, outputpath=self.outputpath, batchsize=self.batchsize)
+        embedder.init_model()
+        embedder.dataloader = embedder.dataloader_setup()
         embedder.embed()
         embedder.process_output()  # by the end of this, there will be a tensors.pt file in self.inputpath
 
@@ -62,7 +64,7 @@ class KNNIndexInference:
     def find_tensors_and_convert(self):
         tensorpath = next(Path(self.inputpath).rglob("**/tensors.pt"))
         tensor = torch.load(open(tensorpath, 'rb'))
-        return tensor.cpu().unsqueeze(dim=0).numpy()
+        return tensor.cpu().numpy()
 
     def run_inference(self, k=5):
         self.embed_query()
@@ -76,38 +78,50 @@ class KNNIndexInference:
             shutil.copyfile(path, os.path.join(self.outputpath, path.name))
 
     def run_filtered_inference(self, exhaust=10, k=1000):
+        """This returns n=exhaust many results and their respective distances as lists"""
         self.embed_query()
         embedded_query = self.find_tensors_and_convert()
         jsonf = self.find_jsonfile()
         dist, neighbors = self.search_full_index(embedded_query, k)
-        last_distance = 9999
         knn_imagepaths = []
         seen_distances = []
         for index, neighbor in enumerate(neighbors[0]):
             if dist[0][index] not in seen_distances:
                 knn_imagepaths.append(jsonf[str(neighbors[0][index])])
                 seen_distances.append(dist[0][index])
-                if len(knn_imagepaths)>exhaust:
+                if len(knn_imagepaths) > exhaust:
                     break
-        os.makedirs(self.outputpath, exist_ok=True)
-        for path in knn_imagepaths:
+        return knn_imagepaths, seen_distances
+
+    def copy_results(self, knn_neighborpathlist, outputpath=None):
+        """This copies search results into a given folder (defaults to self.outputpath.)"""
+        if outputpath:
+            writepath = Path(outputpath)
+        else:
+            writepath = self.outputpath
+        os.makedirs(writepath, exist_ok=True)
+        for path in knn_neighborpathlist:
             path = Path(path)
-            shutil.copyfile(path, os.path.join(self.outputpath, path.name))
+            shutil.copyfile(path, os.path.join(writepath, path.name))
 
 
 class KNNIndexTrainer:
-    def __init__(self, inputpath, outputpath, batchsize):
+    def __init__(self, inputpath, batchsize, outputpath=None, ):
         self.inputpath = Path(inputpath)
-        self.outputpath = Path(outputpath)
+        if outputpath:
+            self.outputpath = Path(outputpath)
+        else:
+            self.outputpath = self.inputpath
         self.writepath = os.path.join(self.inputpath.parent, "index")
         self.vectors = self.find_tensors_and_convert()
-        self.index = faiss.index_factory(self.vectors.shape[1], "IVF500,Flat")
+        self.index = faiss.index_factory(self.vectors.shape[1], "IVF400,Flat")
         self.batchsize = batchsize
 
     def find_tensors_and_convert(self):
         glob = Path(self.inputpath).rglob("**/tensors.pt")
-        glob = sorted(glob, key=os.path.getctime)
-        tensors = [torch.load(open(path, 'rb')) for path in glob]
+        glob = sorted(glob, key=os.path.getctime)[:500000]
+        tensors = [torch.load(open(path, 'rb')).cpu() for path in glob]
+        tensors = tensors[:int(0.5*len(tensors))]
         for index, tensor in enumerate(tensors):
             if len(tensor.shape) < 2:
                 tensors[index] = tensor.unsqueeze(dim=0)
@@ -149,28 +163,25 @@ class KNNIndexTrainer:
             self.write_index(f"block_{i}.index")
         self.read_index()
         block_fnames = [os.path.join(self.writepath, f"block_{b}.index") for b in range(n_batches)]
-        merge_ondisk(self.index, block_fnames, "merged_index.ivfdata")
+        merge_ondisk(self.index, block_fnames, os.path.join(self.writepath, "merged_index.ivfdata"))
         self.write_index("populated.index")
-        self.find_paths_and_merge()
+        for block in block_fnames:
+            os.remove(block)
 
-    def search_full_index(self, vectors, k):
-        self.read_index("populated.index")
-        self.index.nprobe = 80
-        distances, neighbors = self.index.search(vectors, k)
-        return distances, neighbors
+        self.find_paths_and_merge()
 
 
 def main():
     """The main function can be called from the command line to build an index."""
     train = True
-    train = False  # transform to cmd-line-option later
+    # train = False  # transform to cmd-line-option later
     if train:
         kwargs = parse_args()
         knn = KNNIndexTrainer(**kwargs)
         knn.build_index()
     else:
-        # knn = KNNIndexInference(inputpath="/home/frank/data/celador/query3", dataset="/home/frank/data/celador")
-        knn = KNNIndexInference(inputpath="/home/frank/data/.60k/query2", dataset="/home/frank/data/.60k")
+        knn = KNNIndexInference(inputpath="/home/frank/data/celador/knn/knn_inference/query_4",
+                                dataset="/home/frank/data/celador")
         knn.run_filtered_inference()
     torch.cuda.empty_cache()
 
