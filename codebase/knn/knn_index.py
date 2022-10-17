@@ -38,7 +38,7 @@ class KNNIndexInference:
     def find_indexfile(self):
         try:
             indexfile = next(Path(self.dataset).rglob("populated.index"))
-            return faiss.read_index(indexfile.as_posix())
+            return faiss.read_index(indexfile.as_posix(), faiss.IO_FLAG_ONDISK_SAME_DIR)
         except StopIteration:
             raise FileNotFoundError("No index file found. Exiting.")
 
@@ -93,6 +93,28 @@ class KNNIndexInference:
                     break
         return knn_imagepaths, seen_distances
 
+    def inference_for_dataset_cleanup(self, exhaust=100, k=5000):
+        """This returns n=exhaust many results and their respective distances as lists.
+        IMPORTANT: returns results for batches of images!"""
+        self.embed_query()
+        embedded_query = self.find_tensors_and_convert()
+        jsonf = self.find_jsonfile()
+        dists, neighbors = self.search_full_index(embedded_query, k)
+        knn_imagepaths = []
+        seen_distances = []
+        for idx, sample in enumerate(neighbors):
+            sample_imagepaths = []
+            sample_distances = []
+            for index, neighbor in enumerate(sample):
+                if dists[idx][index] not in sample_distances:
+                    sample_imagepaths.append(jsonf[str(sample[index])])
+                    sample_distances.append(dists[idx][index])
+                    if len(sample_imagepaths) > exhaust:
+                        break
+            knn_imagepaths.append(sample_imagepaths)
+            seen_distances.append(sample_distances)
+        return knn_imagepaths, seen_distances
+
     def copy_results(self, knn_neighborpathlist, outputpath=None):
         """This copies search results into a given folder (defaults to self.outputpath.)"""
         if outputpath:
@@ -103,6 +125,39 @@ class KNNIndexInference:
         for path in knn_neighborpathlist:
             path = Path(path)
             shutil.copyfile(path, os.path.join(writepath, path.name))
+
+
+class CaptionKNNIndexInference(KNNIndexInference):
+    """Searches for nearest-neighbor embeddings on captions."""
+
+    def __init__(self, querylist: list, dataset, inputpath="."):
+        super().__init__(inputpath, dataset)
+        self.captions = querylist
+
+    def embed_query(self):
+        from sentence_transformers import SentenceTransformer
+        import os
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+        net = SentenceTransformer('all-MiniLM-L6-v2')
+        net.max_seq_length = 30  # quadratic increase of transformer nodes with increasing input size!
+        embedded_query = net.encode(self.captions, convert_to_tensor=True)
+        return embedded_query.cpu().numpy()
+
+    def run_filtered_inference(self, exhaust=10, k=1000):
+        """This returns n=exhaust many results and their respective distances as lists"""
+        embedded_query = self.embed_query()
+        jsonf = self.find_jsonfile()
+        dist, neighbors = self.search_full_index(embedded_query, k)
+        knn_imagepaths = []
+        seen_distances = []
+        for index, neighbor in enumerate(neighbors[0]):
+            if dist[0][index] not in seen_distances:
+                knn_imagepaths.append(jsonf[str(neighbors[0][index])])
+                seen_distances.append(dist[0][index])
+                if len(knn_imagepaths) > exhaust:
+                    break
+        return knn_imagepaths, seen_distances
 
 
 class KNNIndexTrainer:
@@ -121,7 +176,7 @@ class KNNIndexTrainer:
         glob = Path(self.inputpath).rglob("**/tensors.pt")
         glob = sorted(glob, key=os.path.getctime)[:500000]
         tensors = [torch.load(open(path, 'rb')).cpu() for path in glob]
-        tensors = tensors[:int(0.5*len(tensors))]
+        tensors = tensors[:int(0.5 * len(tensors))]
         for index, tensor in enumerate(tensors):
             if len(tensor.shape) < 2:
                 tensors[index] = tensor.unsqueeze(dim=0)

@@ -9,7 +9,7 @@ from codebase.data.transforms import efficientnet_transforms
 import json
 from pathlib import Path
 
-from codebase.data.datasets import IFSet
+from codebase.data.datasets import IFSet, SBERTSet
 
 warnings.filterwarnings('ignore')
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -98,7 +98,7 @@ class Embedder:
 
         tensors = [torch.load(open(path, 'rb')) for path in glob]
         for index, tensor in enumerate(tensors):
-            if len(tensor.shape) < 2:   # tensors must have the same size, but single-entry tensors (one image) have d=1
+            if len(tensor.shape) < 2:  # tensors must have the same size, but single-entry tensors (one image) have d=1
                 tensors[index] = tensor.unsqueeze(dim=0)
         merge = torch.cat(tensors)
         torch.save(merge, os.path.join(self.write_path, f"tensors.pt"))
@@ -128,19 +128,62 @@ class Embedder:
             print(f"error in: {self.inputpath.name}")
 
 
+class SentenceEmbedder(Embedder):
+
+    def init_model(self):
+        from sentence_transformers import SentenceTransformer
+        import os
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+        self.net = SentenceTransformer('all-MiniLM-L6-v2')
+        self.net.max_seq_length = 30  # quadratic increase of transformer nodes with increasing input size!
+
+    def embed(self):
+        os.makedirs(self.write_path, exist_ok=True)
+        try:
+            for index, batch in enumerate(self.dataloader):
+                captions, paths = batch
+                # captions = captions.to(device)
+                outputs = self.net.encode(captions, convert_to_tensor=True)
+                # outputs = outputs.squeeze()
+                # print(f"shape of the output is:{outputs.shape}")
+                torch.save(outputs, os.path.join(self.write_path, f"batch_{index}.pt"))
+                self.update_filepaths(index, paths)
+        except:
+            print(f"error in: {self.inputpath.name}")
+
+    def dataloader_setup(self):
+        # init new dataloader for jsonfile-content
+        dataset = SBERTSet(self.inputpath.as_posix())
+        return DataLoader(dataset=dataset, batch_size=self.batchsize, num_workers=4)
+
+    def update_params(self, inputpath, outputpath, batchsize):
+        self.inputpath = Path(inputpath)
+        self.outputpath = Path(inputpath)
+        self.batchsize = batchsize
+        self.dataloader = self.dataloader_setup()
+        self.filepaths = {}
+        self.all_paths = []
+        self.tensorpaths = {}
+        self.write_path = self.inputpath
+
+
 def main():
     kwargs = parse_args()
     parentfolder = kwargs.pop("inputpath")
     subdirectories = [p for p in Path(parentfolder).iterdir() if p.is_dir()]
     assert len(subdirectories) > 0, "No subdirectories found! Provide a parent path or move images to subfolder."
-    embedder = Embedder()
+    sbert = True
+    if sbert:
+        embedder = SentenceEmbedder()
+    else:
+        embedder = Embedder()
     embedder.init_model()
     for sub in tqdm(subdirectories):
         embedder.update_params(sub, **kwargs)
-        if os.path.exists(embedder.write_path):
-            if len(os.listdir(embedder.write_path)) == 2:
-                print(f"Directory {embedder.inputpath.name} already processed. Moving on.")
-                continue
+        if os.path.exists(embedder.write_path) and len(os.listdir(embedder.write_path)) == 2:
+            print(f"Directory {embedder.inputpath.name} already processed. Moving on.")
+            continue
         else:
             embedder.embed()
             embedder.process_output()

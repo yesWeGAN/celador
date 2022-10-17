@@ -92,3 +92,28 @@ class IFSet(datasets.ImageFolder):
                 # print(f"Broken image file {path}. Removing.")
                 os.remove(path)
                 self.samples.remove(sample)
+
+
+class SBERTSet(Dataset):
+    """A dataset that loads the JSON-files with captions and turns them into tensors for later-on knn indexing."""
+    def __init__(self, inputpath):
+        self.inputpath = Path(inputpath)
+        self.jsonf = self.load_jsonfile()
+        self.paths = list(self.jsonf.keys())
+        self.captions = list(self.jsonf.values())
+
+    def __len__(self):
+        return len(self.captions)
+
+    def __getitem__(self, item):
+        """returns caption and path"""
+        return self.captions[item], self.paths[item]
+
+    def load_jsonfile(self):
+        """loads json file from folder. convention: jsonfile is key (index) - value (path)"""
+        import json
+        try:
+            filep = next(Path(self.inputpath).rglob("*.json"))
+            return json.load(open(filep, 'r'))
+        except StopIteration:
+            raise FileNotFoundError("No json file found. Exiting.")
