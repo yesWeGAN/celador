@@ -13,8 +13,9 @@ bbid.py -f sq3_related.txt -o ~/data/celador/img/bing/ -a --limit 5000000 -t 16
 bbid.py -f 60kn_new_queries_0.txt -o /home/frank/data/.60kn -a --limit 5000000 -t 16
 bbid.py -f -o /home/frank/data/celador_n -a --limit 5000000 -t 8
 
-# CAPTION IMAGES (there is still some uncaught exceptions with PIL Unidentified Iamge error)
-python3 captioner.py -i /home/frank/data/.gen/img -o /home/frank/data/.gen/caption -bs 10
+
+# caption images batched
+python3 /home/frank/ofa/OFA/caption_batched.py -i /home/frank/ssd/backup/data/instagram/bogan/____00subset -o /home/frank/ssd/backup/data/instagram/caption -bs 16
 
 
 # build index
