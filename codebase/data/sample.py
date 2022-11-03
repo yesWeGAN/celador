@@ -1,7 +1,8 @@
 class Sample():
     def __init__(self,
-        id = None, # potentially hash in the future
-        img_path = None,
+        id = None,  # hash
+        parent = None,  # original folder name
+        img_path = None,    # current
         embd_tensor_path = None,
         embd_tensor_index = None,
         caption = None,
@@ -10,6 +11,7 @@ class Sample():
         classification = None
     ):
         self.id = id
+        self.parent = parent
         self.img_path = img_path
         self.embd_tensor_path = embd_tensor_path
         self.embd_tensor_index = embd_tensor_index
