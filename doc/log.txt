@@ -3,3 +3,4 @@ update the memory from time to time! BUT: from pretrained
 
 KNN for both image and caption! 
 CLEANUP SCHEDULED
+3.11. CLEANUP COMMENCED
