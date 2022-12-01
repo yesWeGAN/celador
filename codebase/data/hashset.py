@@ -25,7 +25,21 @@ def parse_args():
     parser.add_argument('-t', '--transform', action='store_true', help='transform dataset from raw')
     args = parser.parse_args()
     return args
+"""TODO incorporate stuff to find hashes
+from pprint import pprint
 
+def search_hash_in_set(hashidlist):
+    hashmatches = []
+    for hashid in hashidlist:
+        for key in hashset.samples.keys():
+            if hashid in key:
+                hashmatches.append(key)
+    return hashmatches
+
+def print_hashmatches(hashmatches):
+    for match in hashmatches:
+        pprint(vars(hashset.samples[match]))
+    """
 
 class HashSetTransformer:
     """This class combines a dataset with img, img embd, cap, cap embd in one access structure.

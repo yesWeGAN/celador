@@ -29,29 +29,13 @@ dataset_structures = {"celador":
                            "target_dir": "/home/frank/Documents/dev_data_subset/target"
                            },
 
-                      "hash-0":
-                          {"_source_caption_dir": "/home/frank/ssd/backup/data/instagram/caption",
-                           "_source_embd_dir": "/home/frank/ssd/backup/data/instagram/knn",
-                           "_source_img_dir": "/home/frank/ssd/backup/data/instagram/bogan/____00subset",
-                           "sourcepath": "/home/frank/ssd/backup/data/instagram",
-                           "dataset_name": "hash",
-                           "target_dir": "/home/frank/ssd/backup/datasets"
+                      "hash-2":
+                          {"_source_caption_dir": "/home/frank/insta_extraction",
+                           "_source_embd_dir": "/home/frank/insta_extraction",
+                           "_source_img_dir": "/home/frank/insta_extraction/img",
+                           "sourcepath": "/home/frank/insta_extraction",
+                           "dataset_name": "add-hash",
+                           "target_dir": "/home/frank/datasets"
                            },
 
-                      "hash-1":
-                          {"_source_caption_dir": "/home/frank/ssd/backup/data/instagram/caption",
-                           "_source_embd_dir": "/home/frank/ssd/backup/data/instagram/knn",
-                           "_source_img_dir": "/home/frank/ssd/backup/data/instagram/bogan/____01subset",
-                           "sourcepath": "/home/frank/ssd/backup/data/instagram",
-                           "dataset_name": "hash",
-                           "target_dir": "/home/frank/ssd/backup/datasets"
-                           },
-                      "ATF":
-                          {"_source_caption_dir": "/home/frank/.ATF/caption",
-                           "_source_embd_dir": "/home/frank/.ATF/knn",
-                           "_source_img_dir": "/home/frank/.ATF/img",
-                           "sourcepath": "/home/frank/.ATF",
-                           "dataset_name": "atf",
-                           "target_dir": "/home/frank/ssd/backup/datasets"
-                           },
                       }

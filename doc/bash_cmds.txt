@@ -9,13 +9,27 @@ python -m ipykernel install --user --name=firstEnv
 jupyter kernelspec uninstall unwanted-kernel
 
 # BBID (run from directory where queries txt files are. the download history is in -o arg dir )
-bbid.py -f sq3_related.txt -o ~/data/celador/img/bing/ -a --limit 5000000 -t 16
-bbid.py -f 60kn_new_queries_0.txt -o /home/frank/data/.60kn -a --limit 5000000 -t 16
 bbid.py -f -o /home/frank/data/celador_n -a --limit 5000000 -t 8
 
 
 # caption images batched
-python3 /home/frank/ofa/OFA/caption_batched.py -i /home/frank/ssd/backup/data/instagram/bogan/____00subset -o /home/frank/ssd/backup/data/instagram/caption -bs 16
+python3 /home/frank/ofa/OFA/caption_batched.py -i /home/frank/ssd/data/instagram/ -o /home/frank/ssd/data/ -bs 16
+
+## new batch of images (merge this into a script)
+# caption step (seems stable) conda ofa
+python3 /home/frank/ofa/OFA/caption_batched.py -i /home/frank/insta_extraction/img -o /home/frank/insta_extraction/caption -bs 16
+# img embed conda knn, call from celador dir (why not the caption step?) embedder.py still has a hardcoded if/else for SBERT. remove
+python3 /home/frank/celador/codebase/knn/embedder.py -i /home/frank/insta_extraction/img -o /home/frank/insta_extraction/embd -bs 300
+# with SBERT=True. doesnt need the -o option (ignored, puts into input dirs)
+python3 /home/frank/celador/codebase/knn/embedder.py -i /home/frank/insta_extraction/caption -bs 300
+# now build the hashset. need to fill in the dataset structures. if -o from caption step goes to folder named
+"captions" in the root dir (where img dir is), it should automatically navigate there, same for -o in embed step.
+only img needs to be specified, but that can also be altered.
+# run from conda knn. pass -t for transform to hashset, -d specifies dataset structures
+python3 /home/frank/celador/codebase/data/hashset.py -t -d hash-2
+python3 /home/frank/celador/codebase/knn/hash_knn.py -d hash-2
+
+
 
 
 # build index

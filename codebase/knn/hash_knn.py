@@ -24,7 +24,7 @@ def parse_args():
 class KNNHashIndexTrainer:
     def __init__(self,
                  hashset: codebase.data.hashset.HashSet,
-                 batchsize: int = 30000):
+                 batchsize: int = 10000):
         self.hashset = hashset
         self.batchsize = batchsize
         self.outputpath = None
@@ -72,7 +72,7 @@ class KNNHashIndexTrainer:
             print(f"Loading vectors {mode}")
             self.load_vectors(mode)
             print(f"Building index {mode}")
-            self.mode_triplets[mode]["index"] = faiss.index_factory(self.mode_triplets[mode]["vectors"].shape[1], "IVF400,Flat")
+            self.mode_triplets[mode]["index"] = faiss.index_factory(self.mode_triplets[mode]["vectors"].shape[1], "IVF100,Flat")
 
             self.train_index(mode=mode)
             self.write_index(mode=mode)
