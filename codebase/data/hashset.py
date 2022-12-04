@@ -299,6 +299,17 @@ class HashSet(torch.utils.data.Dataset):
         result.result_samples = [self.samples[self.idx_to_hash[idx]] for idx in result.result_indices]
         return result
 
+    def search_hash_id(self, ids: str | list):
+        """enter a single hash-id (inexact match) or a list of ids, get samples matching hash"""
+        if isinstance(ids, str):
+            ids = [ids]
+        all_results = {idx: [] for idx in ids}
+        for sample_id in self.samples.keys():
+            for query_id in ids:
+                if query_id in sample_id:
+                    all_results[query_id].append(self.samples[sample_id])
+        return all_results
+
     def deserialize_samples(self):
         for key, entry in self.jsonfile["samples"].items():
             sample = Sample(hashid=entry["id"],
