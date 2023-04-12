@@ -1,10 +1,15 @@
 # celador
 Finding beauty in the unexpected. 
 
-
-<img src="data/cover.jpg" alt="cover" width="400"/>
-<img src="data/cover2.jpg" alt="cover" width="400"/>
-
-
 17.10.22:
 investigate into: https://www.sbert.net/examples/applications/image-search/README.html
+
+Built a library to match Images with their respective embeddings.
+
+Aimed at 100k+ images scraped with Bing Image Downloader, DuckDuckGo or any other mass downloader of your choice. 
+
+Automatic embedding through EfficientNetB0, captioning via OFA-Sys large and embedding the caption via SentenceBert.
+
+Building lookup index via faiss library on image, caption, and combined embedding level.
+
+Enables discovery of samples through large-scale image databases based on visual and semantic similarity.
