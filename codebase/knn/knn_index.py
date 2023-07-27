@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from faiss.contrib.ondisk import merge_ondisk
 
+import codebase.data.hashset
 from codebase.knn.embedder import Embedder
 
 
@@ -160,6 +161,70 @@ class CaptionKNNIndexInference(KNNIndexInference):
         return knn_imagepaths, seen_distances
 
 
+class KNNHashIndexTrainer:
+    def __init__(self,
+                 hashset: codebase.data.hashset.HashSet,
+                 batchsize: int = 30000):
+        self.hashset = hashset
+        self.batchsize = batchsize
+        self.outputpath = None
+
+        self.embd_outputpath = Path(self.hashset._target_embd_knn_index_subdir)
+        self.caption_outputpath = Path(self.hashset._target_cap_knn_index_subdir)
+        self.combi_outputpath = Path(self.hashset._target_combi_knn_index_subdir)
+
+        self.embd_vectors = None
+        self.cap_vectors = None
+        self.combi_vectors = None
+
+        print("done merging the vectors")
+
+        self.embd_index = faiss.index_factory(self.embd_vectors.shape[1], "IVF400,Flat")
+        self.cap_index = faiss.index_factory(self.cap_vectors.shape[1], "IVF400,Flat")
+        self.combi_index = faiss.index_factory(self.combi_vectors.shape[1], "IVF400,Flat")
+
+        self.mode_triplets = {"embd": {"out": self.embd_outputpath,
+                                       "vectors": self.embd_vectors,
+                                       "index": self.embd_index},
+                              "caption": {"out": self.caption_outputpath,
+                                          "vectors": self.cap_vectors,
+                                          "index": self.cap_index},
+                              "combi": {"out": self.combi_outputpath,
+                                        "vectors": self.combi_vectors,
+                                        "index": self.combi_index}}
+
+    def train_index(self, mode: str):
+        # TODO add the below path to the triplet, load here, dump the hashset in init. make sure each index is del before starting the next
+        self.mode_triplets[mode]["vectors"] = torch.load(os.path.join(self.hashset._target_embd_knn_tensor_subdir, "embd_vectors_combined.pt"))
+        self.mode_triplets[mode]["index"].train(self.mode_triplets[mode]["vectors"][0:self.batchsize])
+
+    def write_index(self, mode: str, filename="trained.index"):
+        os.makedirs(self.mode_triplets[mode]["out"], exist_ok=True)
+        faiss.write_index(self.mode_triplets[mode]["index"], os.path.join(self.mode_triplets[mode]["out"], filename))
+
+    def read_index(self, mode: str, filename="trained.index"):
+        self.mode_triplets[mode]["index"] = faiss.read_index(os.path.join(self.mode_triplets[mode]["out"], filename))
+
+    def build_indexes(self):
+        for mode in self.mode_triplets.keys():
+            self.train_index(mode=mode)
+            self.write_index(mode=mode)
+            n_batches = self.mode_triplets[mode]["vectors"].shape[0] // self.batchsize
+            for i in range(n_batches):
+                self.read_index(mode=mode)
+                self.mode_triplets[mode]["index"].add_with_ids(
+                    self.mode_triplets[mode]["vectors"][i * self.batchsize:(i + 1) * self.batchsize],
+                    np.arange(i * self.batchsize, (i + 1) * self.batchsize))
+                self.write_index(mode=mode, filename=f"block_{i}.index")
+            self.read_index(mode=mode)
+            block_fnames = [os.path.join(self.mode_triplets[mode]["out"], f"block_{b}.index") for b in range(n_batches)]
+            merge_ondisk(self.mode_triplets[mode]["index"], block_fnames,
+                         os.path.join(self.mode_triplets[mode]["out"], "merged_index.ivfdata"))
+            self.write_index(mode=mode, filename="populated.index")
+            for block in block_fnames:
+                os.remove(block)
+
+
 class KNNIndexTrainer:
     def __init__(self, inputpath, batchsize, outputpath=None, ):
         self.inputpath = Path(inputpath)
@@ -176,7 +241,7 @@ class KNNIndexTrainer:
         glob = Path(self.inputpath).rglob("**/tensors.pt")
         glob = sorted(glob, key=os.path.getctime)[:500000]
         tensors = [torch.load(open(path, 'rb')).cpu() for path in glob]
-        tensors = tensors[:int(0.5 * len(tensors))]
+        tensors = tensors  # [:int(0.5 * len(tensors))]
         for index, tensor in enumerate(tensors):
             if len(tensor.shape) < 2:
                 tensors[index] = tensor.unsqueeze(dim=0)
@@ -228,7 +293,7 @@ class KNNIndexTrainer:
 
 def main():
     """The main function can be called from the command line to build an index."""
-    train = True
+    """    train = True
     # train = False  # transform to cmd-line-option later
     if train:
         kwargs = parse_args()
@@ -238,7 +303,10 @@ def main():
         knn = KNNIndexInference(inputpath="/home/frank/data/celador/knn/knn_inference/query_4",
                                 dataset="/home/frank/data/celador")
         knn.run_filtered_inference()
-    torch.cuda.empty_cache()
+    torch.cuda.empty_cache()"""
+    hashset = codebase.data.hashset.HashSet("/home/frank/ssd/backup/datasets/hash/dataset")
+    hashindex = KNNHashIndexTrainer(hashset)
+    # hashindex.build_indexes()
 
 
 if __name__ == '__main__':

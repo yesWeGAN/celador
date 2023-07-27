@@ -1,15 +1,14 @@
 # https://davidefiocco.github.io/nearest-neighbor-search-with-faiss/
 import argparse
-import json
-import os
-import shutil
 from pathlib import Path
-import faiss
-import numpy as np
-import torch
-from faiss.contrib.ondisk import merge_ondisk
 
-from codebase.knn.embedder import Embedder
+import faiss
+import torch
+
+import codebase
+from codebase.data.hashset import HashSet
+from codebase.data.sample import Sample
+
 
 
 def parse_args():
@@ -24,327 +23,149 @@ def parse_args():
     return kwargs
 
 
-def find_jsonfile_index(folder, imgpath):
-    """used to retrieve the index for a given path in json files mapping path-to-tensorindex"""
-    try:
-        filep = next(Path(folder).rglob("paths.json"))
-        jsonf = json.load(open(filep, 'r'))
-        # map path back to index
-        return list(jsonf.keys())[list(jsonf.values()).index(imgpath)]
-    except StopIteration:
-        raise FileNotFoundError("No json file found. Exiting.")
+class HashInferenceResult:
+    def __init__(self,
+                 query: codebase.data.sample.Sample,
+                 searchmode: str = "both",
+                 result_indices=None,
+                 result_distances=None,
+                 result_samples=None):
+
+        if result_samples is None:
+            result_samples = []
+        if result_distances is None:
+            result_distances = []
+        if result_indices is None:
+            result_indices = []
+        self.query = query
+        self.searchmode = searchmode
+        self.result_indices = result_indices
+        self.result_distances = result_distances
+        self.result_samples = result_samples
 
 
-def load_tensorfile_index(path, index):
-    """used to load the pre-processed tensor given an index in the tensor file"""
-    try:
-        filep = next(Path(path).rglob("*tensors.pt"))
-        tensor = torch.load(open(filep, 'rb'))
-        return tensor.cpu().numpy()[int(index)]
-    except StopIteration:
-        raise FileNotFoundError("No json file found. Exiting.")
+class KNNHashIndexInference:
+    """Hash index inference class. Runs from already processed files, using Sample class."""
 
+    def __init__(self,
+                 searchmode: str = "both",
+                 hashset=None,
+                 ):
 
-def register_datasets():
-    """Register a dataset with the 5-tuple: ("images", img_index, img_embd, cap_index, cap_embd)"""
-    datasets = {
-        "celador": {
-            "images": "/home/frank/data/celador/img/bing",
-            "img_index": "/home/frank/data/celador/knn/index",
-            "img_embd": "/home/frank/data/celador/knn/embd",
-            "cap_index": "/home/frank/data/celador/caption/index",
-            "cap_embd": "/home/frank/data/celador/caption/captions",
-            "stout": "/home/frank/data/celador/inference"
-        },
-        "60k": {
-            "images": "/home/frank/data/.60k/img",
-            "img_index": "/home/frank/data/.60k/knn/index",
-            "img_embd": "/home/frank/data/.60k/knn/embd",
-            "cap_index": "/home/frank/data/.60k/caption/index",
-            "cap_embd": "/home/frank/data/.60k/caption/captions",
-            "stout": "/home/frank/data/.60k/inference"
-        },
-        "1m": {
-            "images": "/home/frank/ssd/backup/data/instagram/bogan",
-            "img_index": "/home/frank/ssd/backup/data/instagram/knn/index",
-            "img_embd": "/home/frank/ssd/backup/data/instagram/knn/embd",
-            "cap_index": "/home/frank/ssd/backup/data/instagram/index",
-            "cap_embd": "/home/frank/ssd/backup/data/instagram/caption",
-            "stout": "/home/frank/ssd/backup/data/instagram/inference"
-        }}
-    return datasets
+        self.searchmode = searchmode
+        self.hashset = hashset
+        self.query_temp = {}  # store temporarily
+        self.index = self.find_indexfile(self.hashset, self.searchmode)  # decides in inference
 
+    def gather_query_tensors(self, samplelist: list[Sample]):
+        """get tensors as list (for later on concat) and store reference hash to index in tensor"""
+        query_tensors = []
+        for k, sample in enumerate(samplelist):
+            query_tensor = sample.get_embedding(embeddingtype=self.searchmode)
+            query_tensors.append(query_tensor)
+            self.query_temp[sample.id] = k
 
-class KNNIndexInference:
-    """Reshape this class to be truly useful."""
+        return query_tensors
 
-    def __init__(self, batchsize=100):
-
-        self.batchsize = batchsize
-        self.searchmode = None
-        self.dataset = None  # is a dict from registered datasets
-        self.registered_datasets = register_datasets()
-        self.mode = None
-
-    def infer_mode(self, query: list):
-        if os.path.isfile(query[0]):
-            for q in query:
-                if os.path.isfile(q):
-                    continue
-                else:
-                    raise FileNotFoundError(f"One or more image files not found: {q}")
-            self.mode = "from_images"
-        elif query[0] is isinstance(str):
-            self.mode = "from_caption"
-        else:
-            raise TypeError("Query does not have ")
-
-    def infer_dataset(self, query: list):
-        for key, value in self.registered_datasets.items():
-            if value['images'] in query[0]:
-                for q in query:
-                    if value['images'] in q:
-                        continue
-                    else:
-                        raise FileNotFoundError(f"One or more image files is not from infered dataset {key}: {q}")
-                return self.registered_datasets[key]
-
-    def gather_tensors(self, query, searchmode, cat = True):
-        """This method gathers tensors for both caption and img from pre-processed.
-        Args:
-            query:   list of image paths in "from_images" mode
-            cat:    True | False to concatenate (do not for later on cosine similarity processing)
-        Returns:
-            img_tensors, cap_tensors    (either empty or stacked tensors along dim-0, depending on self.searchmode)"""
-
-        img_tensors = []
-        cap_tensors = []
-
-        for q in query:
-            q = Path(q)
-            parent = q.parent
-
-            if searchmode in ["both", "image"]:
-                img_tensor_dir = os.path.join(self.dataset["img_embd"], parent.name)
-                img_json_index = find_jsonfile_index(img_tensor_dir, q.as_posix())
-                img_tensor = load_tensorfile_index(img_tensor_dir, img_json_index)
-                img_tensors.append(img_tensor)
-
-            if searchmode in ["both", "caption"]:
-                cap_tensor_dir = os.path.join(self.dataset["cap_embd"], parent.name)
-                cap_json_index = find_jsonfile_index(cap_tensor_dir, q.as_posix())
-                cap_tensor = load_tensorfile_index(cap_tensor_dir, cap_json_index)
-                cap_tensors.append(cap_tensor)
-
-        if cat:
-            if searchmode in ["both", "image"]:
-                img_tensors = torch.cat(img_tensors)
-            if searchmode in ["both", "caption"]:
-                cap_tensors = torch.cat(cap_tensors)
-
-        return img_tensors, cap_tensors
-
-    def inference(self, query: list, searchmode=None, output=None):
-        """searchmode: both | image | caption"""
-        # first, determine type of input
-        self.infer_mode(query=query)
-
-        # now, infer datset
-        if self.mode == "from_images":
-            self.dataset = self.infer_dataset(query=query)
-
-        # define search mode: image, caption, or both (default)
+    def inference(self, samplelist: list[Sample], hashset, searchmode=None, exhaust=20):
+        """searchmode: both | embd | caption
+        query: list of hash-ids (str)"""
         if searchmode:
-            self.searchmode = searchmode
-        else:
-            self.searchmode = "both"
+            self.index = self.find_indexfile(hashset=hashset, searchmode=searchmode)
 
-        # now, gather tensors. either from existing, or embed fresh (MISSING TO DO)
-        img_tensors, cap_tensors = self.gather_tensors(query, self.searchmode)
+        self.query_temp = {}  # reset
 
-        img_neighbors = []
-        cap_neighbors = []
+        tensors = self.gather_query_tensors(samplelist=samplelist)
+        tensors = torch.cat(tensors, dim=0).cpu().numpy()
 
-        if self.searchmode in ["both", "image"]:
-            img_neighbors, _ = self.exhaustive_search(img_tensors, which_index="img_index")
+        neighbor_indices, neighbor_dists = self.exhaustive_search(tensors, exhaust=exhaust)
 
-        if self.searchmode in ["both", "caption"]:
-            cap_neighbors, _ = self.exhaustive_search(img_tensors, which_index="cap_index")
+        results = []
+        for row, query in enumerate(samplelist):
+            results.append(HashInferenceResult(query=query,
+                                               searchmode=self.searchmode,
+                                               result_indices=neighbor_indices[row],
+                                               result_distances=neighbor_dists[row]))
 
-        # this here only happens because we do not yet have a common index
-        if self.searchmode == "both":
-            intersection = list(set(img_neighbors).intersection(cap_neighbors))
-            img_tensors = self.gather_tensors(intersection, "image", cat=False)
-            cap_tensors = self.gather_tensors(intersection, "caption", cat=False)
-            print(f"Found intersection in img / cap in {len(intersection)} files:")
-            for i in intersection:
-                print(i)
-            # find_cosines(img_neighbors, cap_neighbors)
+        return results
 
-    def exhaustive_search(self, tensor_embd, which_index, exhaust=100, k=5000):
+    def exhaustive_search(self, tensor_embd, exhaust=20, k=100):
         """This returns n=exhaust many results and their respective distances as lists.
         IMPORTANT: returns results for batches of images!
         Args:
             tensor_embd:    embedding tensor, stacked along dim-0
-            which_index:    caption or img
             exhaust:        cut-off after this many unique neighbors
             k:              return this many neighbors from knn-index"""
 
-        jsonf = self.find_jsonfile(which_index)
-        self.index = self.find_indexfile(which_index)
         dists, neighbors = self.search_full_index(tensor_embd, k)
         knn_imagepaths = []
         seen_distances = []
-        for idx, sample in enumerate(neighbors):
-            sample_imagepaths = []
-            sample_distances = []
-            for index, neighbor in enumerate(sample):
-                if dists[idx][index] not in sample_distances:
-                    sample_imagepaths.append(jsonf[str(sample[index])])
-                    sample_distances.append(dists[idx][index])
-                    if len(sample_imagepaths) > exhaust:
+
+        for query_idx, results in enumerate(neighbors):
+            result_indices = []
+            result_distances = []
+            for index, neighbor in enumerate(results):
+                if dists[query_idx][index] not in result_distances:
+                    result_indices.append(neighbor)
+                    result_distances.append(dists[query_idx][index])
+                    if len(result_indices) > exhaust:
                         break
-            knn_imagepaths.append(sample_imagepaths)
-            seen_distances.append(sample_distances)
+            knn_imagepaths.append(result_indices)
+            seen_distances.append(result_distances)
         return knn_imagepaths, seen_distances
 
-    def find_indexfile(self, which_index):
-        """finds an index file for which_index = caption | img"""
+    def find_indexfile(self, hashset, searchmode=None):
+        """finds an index file for which_index = caption | embd | both"""
+        if searchmode:
+            self.searchmode = searchmode
+        index_subdir = ""
+        if self.searchmode == "caption":
+            index_subdir = hashset._target_cap_knn_index_subdir
+        if self.searchmode == "embd":
+            index_subdir = hashset._target_embd_knn_index_subdir
+        if self.searchmode == "both":
+            index_subdir = hashset._target_combi_knn_index_subdir
         try:
-            indexfile = next(Path(self.dataset[which_index]).rglob("populated.index"))
+            indexfile = next(Path(index_subdir).rglob("populated.index"))
             return faiss.read_index(indexfile.as_posix(), faiss.IO_FLAG_ONDISK_SAME_DIR)
         except StopIteration:
-            raise FileNotFoundError(f"No index file found for {which_index}. Exiting.")
-
-    def find_jsonfile(self, which_index):
-        """Retrieves the json-file for which_index = caption | img, mapping from knn-index to path"""
-        try:
-            filep = next(Path(self.dataset[which_index]).rglob("**/filepath_index.json"))
-            return json.load(open(filep, 'r'))
-        except StopIteration:
-            raise FileNotFoundError(f"No json file found for {which_index}. Exiting.")
-
-    def embed_query(self):
-        embedder = Embedder(inputpath=self.inputpath, outputpath=self.outputpath, batchsize=self.batchsize)
-        embedder.init_model()
-        embedder.dataloader = embedder.dataloader_setup()
-        embedder.embed()
-        embedder.process_output()  # by the end of this, there will be a tensors.pt file in self.inputpath
+            raise FileNotFoundError(f"No index file found for {self.searchmode}. Exiting.")
 
     def search_full_index(self, vectors, k):
         self.index.nprobe = 80
         distances, neighbors = self.index.search(vectors, k)
         return distances, neighbors
 
-    def find_tensors_and_convert(self):
-        tensorpath = next(Path(self.inputpath).rglob("**/tensors.pt"))
-        tensor = torch.load(open(tensorpath, 'rb'))
-        return tensor.cpu().numpy()
-
-    def run_inference(self, k=5):
-        self.embed_query()
-        embedded_query = self.find_tensors_and_convert()
-        dist, neighbors = self.search_full_index(embedded_query, k)
-        jsonf = self.find_jsonfile()
-        knn_imagepaths = [Path(jsonf[str(neighbor)]) for neighbor in neighbors[0]]
-
-        os.makedirs(self.outputpath, exist_ok=True)
-        for path in knn_imagepaths:
-            shutil.copyfile(path, os.path.join(self.outputpath, path.name))
-
-    def run_filtered_inference(self, exhaust=10, k=1000):
-        """This returns n=exhaust many results and their respective distances as lists"""
-        self.embed_query()
-        embedded_query = self.find_tensors_and_convert()
-        jsonf = self.find_jsonfile()
-        dist, neighbors = self.search_full_index(embedded_query, k)
-        knn_imagepaths = []
-        seen_distances = []
-        for index, neighbor in enumerate(neighbors[0]):
-            if dist[0][index] not in seen_distances:
-                knn_imagepaths.append(jsonf[str(neighbors[0][index])])
-                seen_distances.append(dist[0][index])
-                if len(knn_imagepaths) > exhaust:
-                    break
-        return knn_imagepaths, seen_distances
-
-    def inference_for_dataset_cleanup(self, exhaust=100, k=5000):
-        """This returns n=exhaust many results and their respective distances as lists.
-        IMPORTANT: returns results for batches of images!"""
-        self.embed_query()
-        embedded_query = self.find_tensors_and_convert()
-        jsonf = self.find_jsonfile()
-        dists, neighbors = self.search_full_index(embedded_query, k)
-        knn_imagepaths = []
-        seen_distances = []
-        for idx, sample in enumerate(neighbors):
-            sample_imagepaths = []
-            sample_distances = []
-            for index, neighbor in enumerate(sample):
-                if dists[idx][index] not in sample_distances:
-                    sample_imagepaths.append(jsonf[str(sample[index])])
-                    sample_distances.append(dists[idx][index])
-                    if len(sample_imagepaths) > exhaust:
-                        break
-            knn_imagepaths.append(sample_imagepaths)
-            seen_distances.append(sample_distances)
-        return knn_imagepaths, seen_distances
-
-    def copy_results(self, knn_neighborpathlist, outputpath=None):
-        """This copies search results into a given folder (defaults to self.outputpath.)"""
-        if outputpath:
-            writepath = Path(outputpath)
-        else:
-            writepath = self.outputpath
-        os.makedirs(writepath, exist_ok=True)
-        for path in knn_neighborpathlist:
-            path = Path(path)
-            shutil.copyfile(path, os.path.join(writepath, path.name))
-
-
-class CaptionKNNIndexInference(KNNIndexInference):
-    """Searches for nearest-neighbor embeddings on captions."""
-
-    def __init__(self, querylist: list, dataset, inputpath="."):
-        super().__init__(inputpath, dataset)
-        self.captions = querylist
-
-    def embed_query(self):
-        from sentence_transformers import SentenceTransformer
-        import os
-        os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-        net = SentenceTransformer('all-MiniLM-L6-v2')
-        net.max_seq_length = 30  # quadratic increase of transformer nodes with increasing input size!
-        embedded_query = net.encode(self.captions, convert_to_tensor=True)
-        return embedded_query.cpu().numpy()
-
-    def run_filtered_inference(self, exhaust=10, k=1000):
-        """This returns n=exhaust many results and their respective distances as lists"""
-        embedded_query = self.embed_query()
-        jsonf = self.find_jsonfile()
-        dist, neighbors = self.search_full_index(embedded_query, k)
-        knn_imagepaths = []
-        seen_distances = []
-        for index, neighbor in enumerate(neighbors[0]):
-            if dist[0][index] not in seen_distances:
-                knn_imagepaths.append(jsonf[str(neighbors[0][index])])
-                seen_distances.append(dist[0][index])
-                if len(knn_imagepaths) > exhaust:
-                    break
-        return knn_imagepaths, seen_distances
-
-
 
 def main():
     """The main function can be called from the command line to build an index."""
-    inf = KNNIndexInference()
-    q = ["/home/frank/data/celador/img/bing/american_tanks/3b43a774-6de3-4488-a45a-515ff066736c.jpg",
-         "/home/frank/data/celador/img/bing/marines/0b4349c330d4d4347afb2c03ca68c437.jpg"]
-    inf.inference(q)
-    torch.cuda.empty_cache()
+
+    hashset = HashSet("/home/frank/ssd/backup/datasets/hash/dataset")
+
+    querylist = ["0ee2bc44facc16a9e436479e58036929", "1da5525b8028c4d1f36fb465785e9a2f"]
+    samplelist = hashset.prepare_samplelist_from_query(querylist)
+
+    """queryset = HashSet("/home/frank/ssd/backup/datasets/atf/dataset")
+    querylist = ["2f37682102e4b31da05c223bc1c3f2ef", "6e92be19905b1fadf5186387d4735e4e",
+                 "63ec56748cc6ca1440f778757dde3a2b"]
+    samplelist = queryset.prepare_samplelist_from_query(querylist)"""
+
+    """hashset = HashSet("/home/frank/datasets/celador/dataset")
+    querylist = ["03ace42e4655293cf1e4c4ccfc120a22", "0a1772298d4d03e166f76d1d74d6221a"]
+    samplelist = hashset.prepare_samplelist_from_query(querylist)"""
+
+    searchindex = KNNHashIndexInference(searchmode="both", hashset=hashset)
+    resultlist = searchindex.inference(hashset=hashset, samplelist=samplelist, exhaust=9)
+
+    # imported here to avoid circular import error
+    from codebase.data.visualize import SampleVisualizer
+
+    vis = SampleVisualizer()
+    vis = SampleVisualizer("/home/frank/data/apps/.hash_plot_output")
+
+    for res in resultlist:
+        vis.save_knn_result_grid(hashset=hashset, result=res)
 
 
 if __name__ == '__main__':
     main()
-
