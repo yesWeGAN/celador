@@ -1,5 +1,0 @@
-KNN could potentially solve the memory problem. build an index (=memory), where your best predictions get stored near their neighbors
-update the memory from time to time! BUT: from pretrained
-
-KNN for both image and caption! 
-CLEANUP SCHEDULED
