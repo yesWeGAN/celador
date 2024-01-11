@@ -9,20 +9,21 @@ class Sample:
     TODO: add a collate_fn() to retrieve infos.
     """
 
-    def __init__(self,
-                 hashid: str = None,  # hash
-                 parent: str | Path = None,  # original folder name
-                 img_path: str | Path = None,  # current
-                 embd_tensor_path: str | Path = None,
-                 embd_tensor_index: str | Path = None,
-                 embd_index_idx: int = None,
-                 caption: str = None,
-                 cap_tensor_path: str | Path = None,
-                 cap_tensor_index: str | Path = None,
-                 cap_index_idx: int = None,
-                 classification: str = None,
-                 knn_idx: int = None,
-                 ) -> object:
+    def __init__(
+        self,
+        hashid: str = None,  # hash
+        parent: str | Path = None,  # original folder name
+        img_path: str | Path = None,  # current
+        embd_tensor_path: str | Path = None,
+        embd_tensor_index: str | Path = None,
+        embd_index_idx: int = None,
+        caption: str = None,
+        cap_tensor_path: str | Path = None,
+        cap_tensor_index: str | Path = None,
+        cap_index_idx: int = None,
+        classification: str = None,
+        knn_idx: int = None,
+    ) -> object:
         """
 
         :param hashid: unique hash-id
@@ -46,7 +47,13 @@ class Sample:
         self.cap_tensor_path = cap_tensor_path
         self.cap_tensor_index = cap_tensor_index
         self.classification = classification
-        self.combi_tensor_path = os.path.join(Path(self.embd_tensor_path).parent.as_posix().replace("embd", "combi").replace("tensors", "tensor"), "combivector.pt")
+        self.combi_tensor_path = os.path.join(
+            Path(self.embd_tensor_path)
+            .parent.as_posix()
+            .replace("embd", "combi")
+            .replace("tensors", "tensor"),
+            "combivector.pt",
+        )
         self.knn_idx = knn_idx  # attribute is new
 
     def serialize(self):
@@ -54,17 +61,21 @@ class Sample:
 
     def vis_representation(self):
         """Returns the representation used in visualization module."""
-        textboxstr = '\n'.join([
-            self.caption,
-            self.classification if self.classification else "unlabeled",
-        ])
+        textboxstr = "\n".join(
+            [
+                self.caption,
+                self.classification if self.classification else "unlabeled",
+            ]
+        )
         image = Image.open(self.img_path)
         return {"textboxstr": textboxstr, "image": image, "id": self.id}
 
     def check_self_complete(self):
         """Checks if all attributes are filled. Exception for classification."""
         for attr, val in vars(self).items():
-            unchecked_args = [(fragment in attr) for fragment in ["classification", "idx"]]
+            unchecked_args = [
+                (fragment in attr) for fragment in ["classification", "idx"]
+            ]
             if any(unchecked_args):
                 continue
             if attr:
@@ -75,10 +86,12 @@ class Sample:
     def get_embedding(self, embeddingtype="both"):
         tensor = None
         if embeddingtype == "embd":
-            tensor = torch.load(open(self.embd_tensor_path, "rb"))[self.embd_tensor_index]
+            tensor = torch.load(open(self.embd_tensor_path, "rb"))[
+                self.embd_tensor_index
+            ]
         if embeddingtype == "caption":
             tensor = torch.load(open(self.cap_tensor_path, "rb"))[self.cap_tensor_index]
         if embeddingtype == "both":
-            tensor = torch.load(open(self.combi_tensor_path, 'rb'))[self.knn_idx]
+            tensor = torch.load(open(self.combi_tensor_path, "rb"))[self.knn_idx]
 
         return torch.tensor(tensor).unsqueeze(dim=0)

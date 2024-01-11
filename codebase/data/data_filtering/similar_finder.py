@@ -12,12 +12,20 @@ from codebase.knn.knn_index import KNNIndexInference
 
 def parse_args():
     """Echo the input arguments to standard output"""
-    parser = argparse.ArgumentParser(description='Search similar images for a given json-file with filepaths.')
-    parser.add_argument('-i', '--inputpath', type=str, help='json to process')
-    parser.add_argument('-o', '--outputpath', type=str, help='folder for output')
-    parser.add_argument('-k', '--neighbors', type=str, default=100, help='how many neighbors to return')
-    parser.add_argument('-idx', '--index', type=str, help='index folder to match against')
-    parser.add_argument('-bs', '--batchsize', default=300, type=int, help='batchsize for embedder model')
+    parser = argparse.ArgumentParser(
+        description="Search similar images for a given json-file with filepaths."
+    )
+    parser.add_argument("-i", "--inputpath", type=str, help="json to process")
+    parser.add_argument("-o", "--outputpath", type=str, help="folder for output")
+    parser.add_argument(
+        "-k", "--neighbors", type=str, default=100, help="how many neighbors to return"
+    )
+    parser.add_argument(
+        "-idx", "--index", type=str, help="index folder to match against"
+    )
+    parser.add_argument(
+        "-bs", "--batchsize", default=300, type=int, help="batchsize for embedder model"
+    )
 
     args = parser.parse_args()
     kwargs = vars(args)  # convert namespace to dictionary
@@ -26,6 +34,7 @@ def parse_args():
 
 class SimilarFinder:
     """A convenience class to pass a list of images, and get the nearest neighbors based on EfficientNet-Embeddings."""
+
     def __init__(self, inputpath, neighbors, index, outputpath=None, batchsize=100):
         self.inputpath = Path(inputpath)
         self.outputpath = Path(outputpath)
@@ -62,7 +71,7 @@ class SimilarFinder:
             except:
                 print("oops")
 
-    def copy_over_result(self, imgpaths, dists, cutoffdist = 500):
+    def copy_over_result(self, imgpaths, dists, cutoffdist=500):
         for k, p in enumerate(imgpaths):
             if dists[k] < cutoffdist:
                 p = Path(p)
@@ -83,9 +92,10 @@ class SimilarFinder:
         """loads json file from folder. convention: jsonfile is key (index) - value (path)"""
         try:
             filep = next(Path(self.inputpath).rglob("*.json"))
-            return json.load(open(filep, 'r'))
+            return json.load(open(filep, "r"))
         except StopIteration:
             raise FileNotFoundError("No json file found. Exiting.")
+
 
 def main():
     """The main function can be called from the command line."""
@@ -98,5 +108,5 @@ def main():
     torch.cuda.empty_cache()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

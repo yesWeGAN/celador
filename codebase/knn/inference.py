@@ -10,13 +10,14 @@ from codebase.data.hashset import HashSet
 from codebase.data.sample import Sample
 
 
-
 def parse_args():
     """Echo the input arguments to standard output"""
-    parser = argparse.ArgumentParser(description='Embed a folder of images.')
-    parser.add_argument('-i', '--inputpath', type=str, help='folder to process')
-    parser.add_argument('-o', '--outputpath', type=str, help='folder for output')
-    parser.add_argument('-bs', '--batchsize', type=int, help='batchsize for embedder model')
+    parser = argparse.ArgumentParser(description="Embed a folder of images.")
+    parser.add_argument("-i", "--inputpath", type=str, help="folder to process")
+    parser.add_argument("-o", "--outputpath", type=str, help="folder for output")
+    parser.add_argument(
+        "-bs", "--batchsize", type=int, help="batchsize for embedder model"
+    )
 
     args = parser.parse_args()
     kwargs = vars(args)  # convert namespace to dictionary
@@ -24,13 +25,14 @@ def parse_args():
 
 
 class HashInferenceResult:
-    def __init__(self,
-                 query: codebase.data.sample.Sample,
-                 searchmode: str = "both",
-                 result_indices=None,
-                 result_distances=None,
-                 result_samples=None):
-
+    def __init__(
+        self,
+        query: codebase.data.sample.Sample,
+        searchmode: str = "both",
+        result_indices=None,
+        result_distances=None,
+        result_samples=None,
+    ):
         if result_samples is None:
             result_samples = []
         if result_distances is None:
@@ -47,15 +49,17 @@ class HashInferenceResult:
 class KNNHashIndexInference:
     """Hash index inference class. Runs from already processed files, using Sample class."""
 
-    def __init__(self,
-                 searchmode: str = "both",
-                 hashset=None,
-                 ):
-
+    def __init__(
+        self,
+        searchmode: str = "both",
+        hashset=None,
+    ):
         self.searchmode = searchmode
         self.hashset = hashset
         self.query_temp = {}  # store temporarily
-        self.index = self.find_indexfile(self.hashset, self.searchmode)  # decides in inference
+        self.index = self.find_indexfile(
+            self.hashset, self.searchmode
+        )  # decides in inference
 
     def gather_query_tensors(self, samplelist: list[Sample]):
         """get tensors as list (for later on concat) and store reference hash to index in tensor"""
@@ -78,14 +82,20 @@ class KNNHashIndexInference:
         tensors = self.gather_query_tensors(samplelist=samplelist)
         tensors = torch.cat(tensors, dim=0).cpu().numpy()
 
-        neighbor_indices, neighbor_dists = self.exhaustive_search(tensors, exhaust=exhaust)
+        neighbor_indices, neighbor_dists = self.exhaustive_search(
+            tensors, exhaust=exhaust
+        )
 
         results = []
         for row, query in enumerate(samplelist):
-            results.append(HashInferenceResult(query=query,
-                                               searchmode=self.searchmode,
-                                               result_indices=neighbor_indices[row],
-                                               result_distances=neighbor_dists[row]))
+            results.append(
+                HashInferenceResult(
+                    query=query,
+                    searchmode=self.searchmode,
+                    result_indices=neighbor_indices[row],
+                    result_distances=neighbor_dists[row],
+                )
+            )
 
         return results
 
@@ -129,7 +139,9 @@ class KNNHashIndexInference:
             indexfile = next(Path(index_subdir).rglob("populated.index"))
             return faiss.read_index(indexfile.as_posix(), faiss.IO_FLAG_ONDISK_SAME_DIR)
         except StopIteration:
-            raise FileNotFoundError(f"No index file found for {self.searchmode}. Exiting.")
+            raise FileNotFoundError(
+                f"No index file found for {self.searchmode}. Exiting."
+            )
 
     def search_full_index(self, vectors, k):
         self.index.nprobe = 80
@@ -155,7 +167,9 @@ def main():
     samplelist = hashset.prepare_samplelist_from_query(querylist)"""
 
     searchindex = KNNHashIndexInference(searchmode="both", hashset=hashset)
-    resultlist = searchindex.inference(hashset=hashset, samplelist=samplelist, exhaust=9)
+    resultlist = searchindex.inference(
+        hashset=hashset, samplelist=samplelist, exhaust=9
+    )
 
     # imported here to avoid circular import error
     from codebase.data.visualize import SampleVisualizer
@@ -167,5 +181,5 @@ def main():
         vis.save_knn_result_grid(hashset=hashset, result=res)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -15,10 +15,12 @@ from codebase.knn.embedder import Embedder
 
 def parse_args():
     """Echo the input arguments to standard output"""
-    parser = argparse.ArgumentParser(description='Embed a folder of images.')
-    parser.add_argument('-i', '--inputpath', type=str, help='folder to process')
-    parser.add_argument('-o', '--outputpath', type=str, help='folder for output')
-    parser.add_argument('-bs', '--batchsize', type=int, help='batchsize for embedder model')
+    parser = argparse.ArgumentParser(description="Embed a folder of images.")
+    parser.add_argument("-i", "--inputpath", type=str, help="folder to process")
+    parser.add_argument("-o", "--outputpath", type=str, help="folder for output")
+    parser.add_argument(
+        "-bs", "--batchsize", type=int, help="batchsize for embedder model"
+    )
 
     args = parser.parse_args()
     kwargs = vars(args)  # convert namespace to dictionary
@@ -46,12 +48,16 @@ class KNNIndexInference:
     def find_jsonfile(self):
         try:
             filep = next(Path(self.dataset).rglob("**/filepath_index.json"))
-            return json.load(open(filep, 'r'))
+            return json.load(open(filep, "r"))
         except StopIteration:
             raise FileNotFoundError("No json file found. Exiting.")
 
     def embed_query(self):
-        embedder = Embedder(inputpath=self.inputpath, outputpath=self.outputpath, batchsize=self.batchsize)
+        embedder = Embedder(
+            inputpath=self.inputpath,
+            outputpath=self.outputpath,
+            batchsize=self.batchsize,
+        )
         embedder.init_model()
         embedder.dataloader = embedder.dataloader_setup()
         embedder.embed()
@@ -64,7 +70,7 @@ class KNNIndexInference:
 
     def find_tensors_and_convert(self):
         tensorpath = next(Path(self.inputpath).rglob("**/tensors.pt"))
-        tensor = torch.load(open(tensorpath, 'rb'))
+        tensor = torch.load(open(tensorpath, "rb"))
         return tensor.cpu().numpy()
 
     def run_inference(self, k=5):
@@ -138,10 +144,13 @@ class CaptionKNNIndexInference(KNNIndexInference):
     def embed_query(self):
         from sentence_transformers import SentenceTransformer
         import os
+
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-        net = SentenceTransformer('all-MiniLM-L6-v2')
-        net.max_seq_length = 30  # quadratic increase of transformer nodes with increasing input size!
+        net = SentenceTransformer("all-MiniLM-L6-v2")
+        net.max_seq_length = (
+            30  # quadratic increase of transformer nodes with increasing input size!
+        )
         embedded_query = net.encode(self.captions, convert_to_tensor=True)
         return embedded_query.cpu().numpy()
 
@@ -162,9 +171,7 @@ class CaptionKNNIndexInference(KNNIndexInference):
 
 
 class KNNHashIndexTrainer:
-    def __init__(self,
-                 hashset: codebase.data.hashset.HashSet,
-                 batchsize: int = 30000):
+    def __init__(self, hashset: codebase.data.hashset.HashSet, batchsize: int = 30000):
         self.hashset = hashset
         self.batchsize = batchsize
         self.outputpath = None
@@ -181,29 +188,50 @@ class KNNHashIndexTrainer:
 
         self.embd_index = faiss.index_factory(self.embd_vectors.shape[1], "IVF400,Flat")
         self.cap_index = faiss.index_factory(self.cap_vectors.shape[1], "IVF400,Flat")
-        self.combi_index = faiss.index_factory(self.combi_vectors.shape[1], "IVF400,Flat")
+        self.combi_index = faiss.index_factory(
+            self.combi_vectors.shape[1], "IVF400,Flat"
+        )
 
-        self.mode_triplets = {"embd": {"out": self.embd_outputpath,
-                                       "vectors": self.embd_vectors,
-                                       "index": self.embd_index},
-                              "caption": {"out": self.caption_outputpath,
-                                          "vectors": self.cap_vectors,
-                                          "index": self.cap_index},
-                              "combi": {"out": self.combi_outputpath,
-                                        "vectors": self.combi_vectors,
-                                        "index": self.combi_index}}
+        self.mode_triplets = {
+            "embd": {
+                "out": self.embd_outputpath,
+                "vectors": self.embd_vectors,
+                "index": self.embd_index,
+            },
+            "caption": {
+                "out": self.caption_outputpath,
+                "vectors": self.cap_vectors,
+                "index": self.cap_index,
+            },
+            "combi": {
+                "out": self.combi_outputpath,
+                "vectors": self.combi_vectors,
+                "index": self.combi_index,
+            },
+        }
 
     def train_index(self, mode: str):
         # TODO add the below path to the triplet, load here, dump the hashset in init. make sure each index is del before starting the next
-        self.mode_triplets[mode]["vectors"] = torch.load(os.path.join(self.hashset._target_embd_knn_tensor_subdir, "embd_vectors_combined.pt"))
-        self.mode_triplets[mode]["index"].train(self.mode_triplets[mode]["vectors"][0:self.batchsize])
+        self.mode_triplets[mode]["vectors"] = torch.load(
+            os.path.join(
+                self.hashset._target_embd_knn_tensor_subdir, "embd_vectors_combined.pt"
+            )
+        )
+        self.mode_triplets[mode]["index"].train(
+            self.mode_triplets[mode]["vectors"][0 : self.batchsize]
+        )
 
     def write_index(self, mode: str, filename="trained.index"):
         os.makedirs(self.mode_triplets[mode]["out"], exist_ok=True)
-        faiss.write_index(self.mode_triplets[mode]["index"], os.path.join(self.mode_triplets[mode]["out"], filename))
+        faiss.write_index(
+            self.mode_triplets[mode]["index"],
+            os.path.join(self.mode_triplets[mode]["out"], filename),
+        )
 
     def read_index(self, mode: str, filename="trained.index"):
-        self.mode_triplets[mode]["index"] = faiss.read_index(os.path.join(self.mode_triplets[mode]["out"], filename))
+        self.mode_triplets[mode]["index"] = faiss.read_index(
+            os.path.join(self.mode_triplets[mode]["out"], filename)
+        )
 
     def build_indexes(self):
         for mode in self.mode_triplets.keys():
@@ -213,20 +241,34 @@ class KNNHashIndexTrainer:
             for i in range(n_batches):
                 self.read_index(mode=mode)
                 self.mode_triplets[mode]["index"].add_with_ids(
-                    self.mode_triplets[mode]["vectors"][i * self.batchsize:(i + 1) * self.batchsize],
-                    np.arange(i * self.batchsize, (i + 1) * self.batchsize))
+                    self.mode_triplets[mode]["vectors"][
+                        i * self.batchsize : (i + 1) * self.batchsize
+                    ],
+                    np.arange(i * self.batchsize, (i + 1) * self.batchsize),
+                )
                 self.write_index(mode=mode, filename=f"block_{i}.index")
             self.read_index(mode=mode)
-            block_fnames = [os.path.join(self.mode_triplets[mode]["out"], f"block_{b}.index") for b in range(n_batches)]
-            merge_ondisk(self.mode_triplets[mode]["index"], block_fnames,
-                         os.path.join(self.mode_triplets[mode]["out"], "merged_index.ivfdata"))
+            block_fnames = [
+                os.path.join(self.mode_triplets[mode]["out"], f"block_{b}.index")
+                for b in range(n_batches)
+            ]
+            merge_ondisk(
+                self.mode_triplets[mode]["index"],
+                block_fnames,
+                os.path.join(self.mode_triplets[mode]["out"], "merged_index.ivfdata"),
+            )
             self.write_index(mode=mode, filename="populated.index")
             for block in block_fnames:
                 os.remove(block)
 
 
 class KNNIndexTrainer:
-    def __init__(self, inputpath, batchsize, outputpath=None, ):
+    def __init__(
+        self,
+        inputpath,
+        batchsize,
+        outputpath=None,
+    ):
         self.inputpath = Path(inputpath)
         if outputpath:
             self.outputpath = Path(outputpath)
@@ -240,7 +282,7 @@ class KNNIndexTrainer:
     def find_tensors_and_convert(self):
         glob = Path(self.inputpath).rglob("**/tensors.pt")
         glob = sorted(glob, key=os.path.getctime)[:500000]
-        tensors = [torch.load(open(path, 'rb')).cpu() for path in glob]
+        tensors = [torch.load(open(path, "rb")).cpu() for path in glob]
         tensors = tensors  # [:int(0.5 * len(tensors))]
         for index, tensor in enumerate(tensors):
             if len(tensor.shape) < 2:
@@ -255,15 +297,15 @@ class KNNIndexTrainer:
         jsonf = {}
         index = 0
         for p in glob:
-            jsondata = json.load(open(p, 'r'))
+            jsondata = json.load(open(p, "r"))
             for k, path in jsondata.items():
                 jsonf[index] = path
                 index += 1
-        with open(os.path.join(self.writepath, "filepath_index.json"), 'w') as outfile:
+        with open(os.path.join(self.writepath, "filepath_index.json"), "w") as outfile:
             json.dump(jsonf, outfile)
 
     def train_index(self):
-        self.index.train(self.vectors[0:self.batchsize])
+        self.index.train(self.vectors[0 : self.batchsize])
 
     def write_index(self, filename="trained.index"):
         os.makedirs(self.writepath, exist_ok=True)
@@ -278,12 +320,20 @@ class KNNIndexTrainer:
         n_batches = self.vectors.shape[0] // self.batchsize
         for i in range(n_batches):
             self.read_index()
-            self.index.add_with_ids(self.vectors[i * self.batchsize:(i + 1) * self.batchsize],
-                                    np.arange(i * self.batchsize, (i + 1) * self.batchsize))
+            self.index.add_with_ids(
+                self.vectors[i * self.batchsize : (i + 1) * self.batchsize],
+                np.arange(i * self.batchsize, (i + 1) * self.batchsize),
+            )
             self.write_index(f"block_{i}.index")
         self.read_index()
-        block_fnames = [os.path.join(self.writepath, f"block_{b}.index") for b in range(n_batches)]
-        merge_ondisk(self.index, block_fnames, os.path.join(self.writepath, "merged_index.ivfdata"))
+        block_fnames = [
+            os.path.join(self.writepath, f"block_{b}.index") for b in range(n_batches)
+        ]
+        merge_ondisk(
+            self.index,
+            block_fnames,
+            os.path.join(self.writepath, "merged_index.ivfdata"),
+        )
         self.write_index("populated.index")
         for block in block_fnames:
             os.remove(block)
@@ -304,10 +354,12 @@ def main():
                                 dataset="/home/frank/data/celador")
         knn.run_filtered_inference()
     torch.cuda.empty_cache()"""
-    hashset = codebase.data.hashset.HashSet("/home/frank/ssd/backup/datasets/hash/dataset")
+    hashset = codebase.data.hashset.HashSet(
+        "/home/frank/ssd/backup/datasets/hash/dataset"
+    )
     hashindex = KNNHashIndexTrainer(hashset)
     # hashindex.build_indexes()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

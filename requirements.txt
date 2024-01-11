@@ -1,0 +1,7 @@
+pytorch-gpu
+pillow
+torchvision
+numpy
+matplotlib
+faiss-gpu
+tqdm

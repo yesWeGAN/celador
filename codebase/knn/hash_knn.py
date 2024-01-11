@@ -16,15 +16,16 @@ from codebase.data.dataset_structures import dataset_structures
 
 def parse_args():
     """Echo the input arguments to standard output"""
-    parser = argparse.ArgumentParser(description='Train a KNN-index on given dataset.')
-    parser.add_argument('-d', '--dataset', type=str, default="celador", help='dataset specification')
+    parser = argparse.ArgumentParser(description="Train a KNN-index on given dataset.")
+    parser.add_argument(
+        "-d", "--dataset", type=str, default="celador", help="dataset specification"
+    )
     args = parser.parse_args()
     return args
 
+
 class KNNHashIndexTrainer:
-    def __init__(self,
-                 hashset: codebase.data.hashset.HashSet,
-                 batchsize: int = 10000):
+    def __init__(self, hashset: codebase.data.hashset.HashSet, batchsize: int = 10000):
         self.hashset = hashset
         self.batchsize = batchsize
         self.outputpath = None
@@ -41,38 +42,65 @@ class KNNHashIndexTrainer:
         self.cap_index = None
         self.combi_index = None
 
-        self.mode_triplets = {"embd": {"out": self.embd_outputpath,
-                                       "vectorpath": os.path.join(self.hashset._target_embd_knn_tensor_subdir, "embd_vectors_combined.pt"),
-                                       "index": self.embd_index},
-                              "caption": {"out": self.caption_outputpath,
-                                          "vectorpath": os.path.join(self.hashset._target_cap_knn_tensor_subdir, "caption_vectors_combined.pt"),
-                                          "index": self.cap_index},
-                              "combi": {"out": self.combi_outputpath,
-                                        "vectorpath": os.path.join(self.hashset._target_combi_knn_tensor_subdir, "combivector.pt"),
-                                        "index": self.combi_index}}
+        self.mode_triplets = {
+            "embd": {
+                "out": self.embd_outputpath,
+                "vectorpath": os.path.join(
+                    self.hashset._target_embd_knn_tensor_subdir,
+                    "embd_vectors_combined.pt",
+                ),
+                "index": self.embd_index,
+            },
+            "caption": {
+                "out": self.caption_outputpath,
+                "vectorpath": os.path.join(
+                    self.hashset._target_cap_knn_tensor_subdir,
+                    "caption_vectors_combined.pt",
+                ),
+                "index": self.cap_index,
+            },
+            "combi": {
+                "out": self.combi_outputpath,
+                "vectorpath": os.path.join(
+                    self.hashset._target_combi_knn_tensor_subdir, "combivector.pt"
+                ),
+                "index": self.combi_index,
+            },
+        }
         print("Dumping hashset.")
         self.hashset = None
         gc.collect()
 
     def load_vectors(self, mode: str):
-        self.mode_triplets[mode]["vectors"] = torch.load(self.mode_triplets[mode]["vectorpath"]).cpu().numpy()
+        self.mode_triplets[mode]["vectors"] = (
+            torch.load(self.mode_triplets[mode]["vectorpath"]).cpu().numpy()
+        )
 
     def train_index(self, mode: str):
-        self.mode_triplets[mode]["index"].train(self.mode_triplets[mode]["vectors"][0:self.batchsize])
+        self.mode_triplets[mode]["index"].train(
+            self.mode_triplets[mode]["vectors"][0 : self.batchsize]
+        )
 
     def write_index(self, mode: str, filename="trained.index"):
         os.makedirs(self.mode_triplets[mode]["out"], exist_ok=True)
-        faiss.write_index(self.mode_triplets[mode]["index"], os.path.join(self.mode_triplets[mode]["out"], filename))
+        faiss.write_index(
+            self.mode_triplets[mode]["index"],
+            os.path.join(self.mode_triplets[mode]["out"], filename),
+        )
 
     def read_index(self, mode: str, filename="trained.index"):
-        self.mode_triplets[mode]["index"] = faiss.read_index(os.path.join(self.mode_triplets[mode]["out"], filename))
+        self.mode_triplets[mode]["index"] = faiss.read_index(
+            os.path.join(self.mode_triplets[mode]["out"], filename)
+        )
 
     def build_indexes(self):
         for mode in self.mode_triplets.keys():
             print(f"Loading vectors {mode}")
             self.load_vectors(mode)
             print(f"Building index {mode}")
-            self.mode_triplets[mode]["index"] = faiss.index_factory(self.mode_triplets[mode]["vectors"].shape[1], "IVF100,Flat")
+            self.mode_triplets[mode]["index"] = faiss.index_factory(
+                self.mode_triplets[mode]["vectors"].shape[1], "IVF100,Flat"
+            )
 
             self.train_index(mode=mode)
             self.write_index(mode=mode)
@@ -81,15 +109,24 @@ class KNNHashIndexTrainer:
             for i in tqdm(range(n_batches)):
                 self.read_index(mode=mode)
                 self.mode_triplets[mode]["index"].add_with_ids(
-                    self.mode_triplets[mode]["vectors"][i * self.batchsize:(i + 1) * self.batchsize],
-                    np.arange(i * self.batchsize, (i + 1) * self.batchsize))
+                    self.mode_triplets[mode]["vectors"][
+                        i * self.batchsize : (i + 1) * self.batchsize
+                    ],
+                    np.arange(i * self.batchsize, (i + 1) * self.batchsize),
+                )
                 self.write_index(mode=mode, filename=f"block_{i}.index")
             self.read_index(mode=mode)
 
-            block_fnames = [os.path.join(self.mode_triplets[mode]["out"], f"block_{b}.index") for b in range(n_batches)]
+            block_fnames = [
+                os.path.join(self.mode_triplets[mode]["out"], f"block_{b}.index")
+                for b in range(n_batches)
+            ]
             print("Entering index merge mode..")
-            merge_ondisk(self.mode_triplets[mode]["index"], block_fnames,
-                         os.path.join(self.mode_triplets[mode]["out"], "merged_index.ivfdata"))
+            merge_ondisk(
+                self.mode_triplets[mode]["index"],
+                block_fnames,
+                os.path.join(self.mode_triplets[mode]["out"], "merged_index.ivfdata"),
+            )
             self.write_index(mode=mode, filename="populated.index")
 
             print(f"Writing {mode} index complete. Cleaning up variables.")
@@ -101,16 +138,18 @@ class KNNHashIndexTrainer:
             gc.collect()
 
 
-
 def main():
     inputs = parse_args()
-    dataset_path = os.path.join(dataset_structures[inputs.dataset]["target_dir"],
-                                dataset_structures[inputs.dataset]["dataset_name"], "dataset")
+    dataset_path = os.path.join(
+        dataset_structures[inputs.dataset]["target_dir"],
+        dataset_structures[inputs.dataset]["dataset_name"],
+        "dataset",
+    )
     hashset = codebase.data.hashset.HashSet(dataset_path)
 
     hashindex = KNNHashIndexTrainer(hashset)
     hashindex.build_indexes()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

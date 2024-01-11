@@ -11,7 +11,7 @@ from pathlib import Path
 
 from codebase.data.datasets import IFSet, SBERTSet
 
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 torch.cuda.empty_cache()
 
@@ -21,10 +21,12 @@ torch.cuda.empty_cache()
 
 def parse_args():
     """Echo the input arguments to standard output"""
-    parser = argparse.ArgumentParser(description='Embed a folder of images.')
-    parser.add_argument('-i', '--inputpath', type=str, help='folder to process')
-    parser.add_argument('-o', '--outputpath', type=str, help='folder for output')
-    parser.add_argument('-bs', '--batchsize', type=int, help='batchsize for embedder model')
+    parser = argparse.ArgumentParser(description="Embed a folder of images.")
+    parser.add_argument("-i", "--inputpath", type=str, help="folder to process")
+    parser.add_argument("-o", "--outputpath", type=str, help="folder for output")
+    parser.add_argument(
+        "-bs", "--batchsize", type=int, help="batchsize for embedder model"
+    )
 
     args = parser.parse_args()
     kwargs = vars(args)  # convert namespace to dictionary
@@ -37,7 +39,7 @@ class Embedder:
         inputpath:          inputpath
         outputpath:         where to store
         batchsize:          batchsize
-        """
+    """
 
     def __init__(self, inputpath=".", outputpath=".", batchsize=300):
         """lazy init. enables one-by-one processing of subdirectories via update_params() once checks have passed.
@@ -64,7 +66,8 @@ class Embedder:
 
     def init_model(self):
         efficientnet = torchvision.models.efficientnet_b0(
-            weights=torchvision.models.efficientnet.EfficientNet_B0_Weights.DEFAULT)
+            weights=torchvision.models.efficientnet.EfficientNet_B0_Weights.DEFAULT
+        )
         self.net = torch.nn.Sequential(*list(efficientnet.children())[:-1])
 
     def dataloader_setup(self):
@@ -73,7 +76,9 @@ class Embedder:
         return DataLoader(dataset=dataset, batch_size=self.batchsize, num_workers=16)
 
     def update_filepaths(self, index, paths):
-        self.tensorpaths[str(index)] = os.path.join(self.write_path, f"batch_{index}.pt")
+        self.tensorpaths[str(index)] = os.path.join(
+            self.write_path, f"batch_{index}.pt"
+        )
         self.filepaths[f"batch_{index}"] = paths
         for path in paths:
             self.all_paths.append(path)
@@ -86,19 +91,23 @@ class Embedder:
 
     def write_filepaths(self, filepath=None):
         if filepath:
-            with open(filepath, 'w') as fp:
+            with open(filepath, "w") as fp:
                 json.dump(self.filepaths, fp)
         else:
-            with open(os.path.join(self.write_path, f"{self.inputpath.name}.json"), 'w') as fp:
+            with open(
+                os.path.join(self.write_path, f"{self.inputpath.name}.json"), "w"
+            ) as fp:
                 json.dump(self.filepaths, fp)
 
     def merge_tensors(self):
         glob = Path(self.write_path).rglob("batch_*.pt")
         glob = sorted(glob, key=os.path.getctime)
 
-        tensors = [torch.load(open(path, 'rb')) for path in glob]
+        tensors = [torch.load(open(path, "rb")) for path in glob]
         for index, tensor in enumerate(tensors):
-            if len(tensor.shape) < 2:  # tensors must have the same size, but single-entry tensors (one image) have d=1
+            if (
+                len(tensor.shape) < 2
+            ):  # tensors must have the same size, but single-entry tensors (one image) have d=1
                 tensors[index] = tensor.unsqueeze(dim=0)
         merge = torch.cat(tensors)
         torch.save(merge, os.path.join(self.write_path, f"tensors.pt"))
@@ -122,21 +131,25 @@ class Embedder:
                 with torch.no_grad():
                     outputs = self.net(tensors)
                     outputs = outputs.squeeze()
-                    torch.save(outputs, os.path.join(self.write_path, f"batch_{index}.pt"))
+                    torch.save(
+                        outputs, os.path.join(self.write_path, f"batch_{index}.pt")
+                    )
                 self.update_filepaths(index, paths)
         except:
             print(f"error in: {self.inputpath.name}")
 
 
 class SentenceEmbedder(Embedder):
-
     def init_model(self):
         from sentence_transformers import SentenceTransformer
         import os
+
         os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-        self.net = SentenceTransformer('all-MiniLM-L6-v2')
-        self.net.max_seq_length = 30  # quadratic increase of transformer nodes with increasing input size!
+        self.net = SentenceTransformer("all-MiniLM-L6-v2")
+        self.net.max_seq_length = (
+            30  # quadratic increase of transformer nodes with increasing input size!
+        )
 
     def embed(self):
         os.makedirs(self.write_path, exist_ok=True)
@@ -172,7 +185,9 @@ def main():
     kwargs = parse_args()
     parentfolder = kwargs.pop("inputpath")
     subdirectories = [p for p in Path(parentfolder).iterdir() if p.is_dir()]
-    assert len(subdirectories) > 0, "No subdirectories found! Provide a parent path or move images to subfolder."
+    assert (
+        len(subdirectories) > 0
+    ), "No subdirectories found! Provide a parent path or move images to subfolder."
     sbert = True
     if sbert:
         embedder = SentenceEmbedder()
@@ -181,7 +196,10 @@ def main():
     embedder.init_model()
     for sub in tqdm(subdirectories):
         embedder.update_params(sub, **kwargs)
-        if os.path.exists(embedder.write_path) and len(os.listdir(embedder.write_path)) == 2:
+        if (
+            os.path.exists(embedder.write_path)
+            and len(os.listdir(embedder.write_path)) == 2
+        ):
             print(f"Directory {embedder.inputpath.name} already processed. Moving on.")
             continue
         else:
@@ -191,5 +209,5 @@ def main():
         torch.cuda.empty_cache()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -24,10 +24,14 @@ def make_dataset(directory, class_to_idx, extensions=None, is_valid_file=None):
     both_none = extensions is None and is_valid_file is None
     both_something = extensions is not None and is_valid_file is not None
     if both_none or both_something:
-        raise ValueError("Both extensions and is_valid_file cannot be None or not None at the same time")
+        raise ValueError(
+            "Both extensions and is_valid_file cannot be None or not None at the same time"
+        )
     if extensions is not None:
+
         def is_valid_file(x: str) -> bool:
             return has_file_allowed_extension(x, extensions)  # type: ignore[arg-type]
+
     is_valid_file = cast(Callable[[str], bool], is_valid_file)
     instances = []
     available_classes = set()
@@ -46,7 +50,9 @@ def make_dataset(directory, class_to_idx, extensions=None, is_valid_file=None):
                         available_classes.add(target_class)
     empty_classes = set(class_to_idx.keys()) - available_classes
     if empty_classes:
-        msg = f"Found no valid file for the classes {', '.join(sorted(empty_classes))}. "
+        msg = (
+            f"Found no valid file for the classes {', '.join(sorted(empty_classes))}. "
+        )
         if extensions is not None:
             msg += f"Supported extensions are: {extensions if isinstance(extensions, str) else ', '.join(extensions)}"
         raise FileNotFoundError(msg)
@@ -68,7 +74,10 @@ class IFSet(datasets.ImageFolder):
         if self.target_transform is not None:
             target = self.target_transform(target)
 
-        return sample, path  # need path instead of return sample, target (class irrelevant for now)
+        return (
+            sample,
+            path,
+        )  # need path instead of return sample, target (class irrelevant for now)
 
     def find_classes(self, directory: str):
         return find_classless(directory)
@@ -79,7 +88,9 @@ class IFSet(datasets.ImageFolder):
         sequential processing of multiple folders."""
         if class_to_idx is None:
             raise ValueError("The class_to_idx parameter cannot be None.")
-        return make_dataset(directory, class_to_idx, extensions=extensions, is_valid_file=is_valid_file)
+        return make_dataset(
+            directory, class_to_idx, extensions=extensions, is_valid_file=is_valid_file
+        )
 
     def sanity_check_imagefiles(self):
         for sample in self.samples:
@@ -96,6 +107,7 @@ class IFSet(datasets.ImageFolder):
 
 class SBERTSet(Dataset):
     """A dataset that loads the JSON-files with captions and turns them into tensors for later-on knn indexing."""
+
     def __init__(self, inputpath):
         self.inputpath = Path(inputpath)
         self.jsonf = self.load_jsonfile()
@@ -112,8 +124,9 @@ class SBERTSet(Dataset):
     def load_jsonfile(self):
         """loads json file from folder. convention: jsonfile is key (index) - value (path)"""
         import json
+
         try:
             filep = next(Path(self.inputpath).rglob("*.json"))
-            return json.load(open(filep, 'r'))
+            return json.load(open(filep, "r"))
         except StopIteration:
             raise FileNotFoundError("No json file found. Exiting.")
